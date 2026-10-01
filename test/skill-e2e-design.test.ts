@@ -461,10 +461,10 @@ Build a user dashboard that shows account stats, recent activity, and settings.
 Review the plan in ./plan.md. Its design gaps are vague "clean, modern UI" and "cards and icons", a "hero section with gradient" (AI slop), and missing empty, error, loading, responsive, and accessibility behavior.
 
 Use this non-interactive delivery sequence:
-1. Skip the preamble bash block and any AskUserQuestion calls. Read every lazy section the workflow requires. Review all 7 design passes. Rate each scored design dimension 0-10 and explain what would make it a 10; preserve the unresolved-decisions pass and every required design decision.
-2. EDIT plan.md with the missing design decisions (interaction state table, empty states, responsive behavior, etc.) and the full required review report. Keep the saved review compact: use the canonical tables and decision IDs. Specify each design requirement once; refer to its section or decision ID from other pass rationales, tasks, and report cells instead of repeating that specification. Give concise score rationales and 10/10 explanations. Retain all required report fields, design decisions, diagrams, ratings, and explanations.
+1. Skip the preamble bash block and any AskUserQuestion calls. Read every lazy section the workflow requires: in one response, natively Read plan-design-review/SKILL.md (Read the remainder with offset if the first Read stops early), plan-design-review/sections/review-sections.md (the one lazy section this review requires) and plan.md. No cat, sed, ls, manifest or git exploration is needed. Review all 7 design passes. Rate each scored design dimension 0-10 and explain what would make it a 10; preserve the unresolved-decisions pass and every required design decision.
+2. EDIT plan.md with the missing design decisions (interaction state table, empty states, responsive behavior, etc.) and the full required review report. Keep the saved review compact: use the canonical tables and decision IDs. Specify each design requirement once; refer to its section or decision ID from other pass rationales, tasks, and report cells instead of repeating that specification. Give concise score rationales and 10/10 explanations. Retain all required report fields, design decisions, diagrams, ratings, and explanations. Keep everything you add to plan.md, including the report, under 14,000 characters.
 3. Persist that complete plan and review with Write before publishing a completed walkthrough or saying a fix is applied. Read plan.md back to verify the saved changes.
-4. Then return a brief, concrete summary of the design changes; do not repeat the full review in the response. This changes presentation only: execute every required pass and lazy-section Read.
+4. Then return a brief, concrete summary of the design changes in at most ten lines; do not repeat the full review in the response. This changes presentation only: execute every required pass and lazy-section Read.
 
 IMPORTANT: Do NOT try to browse any URLs or use a browse binary. This is a plan review, not a live site audit.`,
               workingDirectory: reviewDir,
@@ -836,8 +836,19 @@ function pluginDetectorFixture() {
   git('commit', '-m', 'initial');
   git('checkout', '-b', 'feature/landing');
   fs.copyFileSync(path.join(ROOT, 'test/fixtures/review-eval-design-slop.html'), path.join(repoDir, 'index.html'));
+  fs.copyFileSync(path.join(ROOT, 'test/fixtures/review-eval-design-slop.css'), path.join(repoDir, 'styles.css'));
   git('add', '.');
   git('commit', '-m', 'landing page');
+  // The engine reports this repository's files and lines, so its evidence is checkable where the page links it.
+  const located = (file: string, needle: string) => ({ file, line: fs.readFileSync(path.join(repoDir, file), 'utf-8').split('\n').findIndex(text => text.includes(needle)) + 1 });
+  const sample = path.join(fixture.dir, 'impeccable-detect-sample.json');
+  fs.writeFileSync(sample, JSON.stringify((JSON.parse(fs.readFileSync(sample, 'utf-8')) as Array<Record<string, unknown>>).map(finding => {
+    const snippet = String(finding.snippet);
+    const where = finding.antipattern === 'skipped-heading' ? located('index.html', 'Feature One')
+      : finding.antipattern === 'marketing-buzzword' ? located('index.html', 'streamline')
+      : located('styles.css', /on (#[0-9a-f]{6})/.exec(snippet)?.[1] ?? '#8b5cf6');
+    return { ...finding, ...where };
+  }), null, 2));
   fs.writeFileSync(path.join(repoDir, 'design-review-detector.md'), detectorSkillText([
     ['**Design detector (optional, deterministic):**', '**Create output directories:**'],
     ['**Phase 0: mechanical scan**', '## Phases 1-6'],
@@ -860,6 +871,17 @@ if (!evalsEnabled) test('plugin detector fixture discovers the selected engine w
     });
     expect(scan.status).toBe(2);
     expect(scan.stderr).toContain('handoff=/impeccable colorize');
+    // Census 36709485593: rows naming test/fixtures/... paths absent from this repo cost four
+    // reconciliation turns and exceeded max turns. Every row must cite a repo file:line holding its evidence.
+    const rows = [...scan.stderr.matchAll(/^ {2}(\S+):(\d+) {2}(.*)$/gm)];
+    expect(rows).toHaveLength(6);
+    for (const [, file, line, snippet] of rows) {
+      const text = fs.readFileSync(path.join(fixture.repoDir, file!), 'utf-8').split('\n')[Number(line) - 1]!;
+      const evidence = /on (#[0-9a-f]{6})/.exec(snippet!)?.[1] ?? (/Purple/.test(snippet!) ? '#8b5cf6' : /buzzword/.test(snippet!) ? 'streamline' : 'Feature One');
+      expect(text, `${file}:${line}`).toContain(evidence);
+    }
+    const shipped = JSON.parse(fs.readFileSync(DETECT_SAMPLE, 'utf-8')) as Array<{ file: string }>;
+    expect(shipped.every(finding => !fs.existsSync(path.join(fixture.repoDir, finding.file)))).toBe(true);
     expect(fs.existsSync(path.join(fixture.dir, '4.10.0.jsonl'))).toBe(true);
     expect(fs.existsSync(path.join(fixture.dir, '4.3.1.jsonl'))).toBe(false);
     expect(fs.existsSync(path.join(fixture.dir, 'launcher-ran'))).toBe(false);

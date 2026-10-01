@@ -23,6 +23,8 @@ export interface JudgeScore {
   reasoning: string;
 }
 
+export const JUDGE_SCORE_DIMENSIONS = ['clarity', 'completeness', 'actionability'] as const;
+
 export interface JudgeRefusalEvidence {
   stop_reason: 'refusal';
   response_id: string | null;
@@ -197,6 +199,63 @@ export async function callJudge<T>(
 }
 
 /**
+ * Samples per judge panel: EVAL_POLICY.judge.samples, restated here so this
+ * helper (imported by many paid tests) does not pull the quarantine registry
+ * into their touchfile closure. test/judge-panel.test.ts pins the two equal.
+ */
+export const JUDGE_PANEL_SAMPLES = 3;
+
+/**
+ * Judge panel (EVAL_POLICY.judge): every `judge`-kind entry draws a fixed number of
+ * independent samples of the SAME prompt concurrently, inside its unchanged
+ * JUDGE_MS budget. Numeric dimensions gate on the per-dimension panel mean
+ * against the unchanged minimum; boolean fields gate on a strict majority.
+ * A sample that errors (refusal, truncation, non-JSON, malformed field) fails
+ * the whole panel and is never resampled. callJudge's 429 backoff happens
+ * before any model output exists, so it is transport, not a verdict retry.
+ */
+export async function judgePanel<T>(sample: () => Promise<T>): Promise<T[]> {
+  const settled = await Promise.allSettled(Array.from({ length: JUDGE_PANEL_SAMPLES }, () => sample()));
+  const failures = settled.flatMap((result, index) => result.status === 'rejected' ? [{ index, reason: result.reason }] : []);
+  if (failures.length === 0) return settled.map(result => (result as PromiseFulfilledResult<T>).value);
+  const first = failures[0]!;
+  // A refusal is an unscored panel only when EVERY sample refused; a partial
+  // refusal beside scored samples is an ordinary failed panel.
+  if (first.reason instanceof JudgeRefusalError && failures.length < settled.length) {
+    throw new Error(`Judge panel sample ${first.index + 1} of ${settled.length} failed beside scored samples: ${first.reason.message}`);
+  }
+  throw first.reason;
+}
+
+/** Per-dimension mean over a panel; any non-finite sample value fails the panel. */
+export function judgePanelMean<K extends string>(samples: ReadonlyArray<Record<K, unknown>>, keys: readonly K[]): Record<K, number> {
+  if (samples.length === 0) throw new Error('Judge panel has no samples');
+  return Object.fromEntries(keys.map(key => {
+    const values = samples.map(sample => sample && typeof sample === 'object' ? sample[key] : undefined);
+    const bad = values.findIndex(value => typeof value !== 'number' || !Number.isFinite(value));
+    if (bad !== -1) throw new Error(`Judge panel sample ${bad + 1} has non-numeric ${key}: ${JSON.stringify(values[bad])}`);
+    return [key, (values as number[]).reduce((sum, value) => sum + value, 0) / values.length];
+  })) as Record<K, number>;
+}
+
+/** Strict majority of a boolean field; any non-boolean sample value fails the panel. */
+export function judgePanelMajority<K extends string>(samples: ReadonlyArray<Record<K, unknown>>, key: K): boolean {
+  if (samples.length === 0) throw new Error('Judge panel has no samples');
+  const values = samples.map(sample => sample && typeof sample === 'object' ? sample[key] : undefined);
+  const bad = values.findIndex(value => typeof value !== 'boolean');
+  if (bad !== -1) throw new Error(`Judge panel sample ${bad + 1} has non-boolean ${key}: ${JSON.stringify(values[bad])}`);
+  return values.filter(value => value === true).length * 2 > values.length;
+}
+
+/** Sample reasoning lines, numbered, for the collector record. */
+export function judgePanelReasoning(samples: ReadonlyArray<unknown>): string {
+  return samples.map((sample, index) => {
+    const reasoning = sample && typeof sample === 'object' ? (sample as { reasoning?: unknown }).reasoning : undefined;
+    return `[sample ${index + 1}] ${typeof reasoning === 'string' ? reasoning : ''}`;
+  }).join('\n');
+}
+
+/**
  * Score documentation quality on clarity/completeness/actionability (1-5).
  */
 export async function judge(section: string, content: string): Promise<JudgeScore> {
@@ -338,6 +397,16 @@ ${text}`, undefined, { signal });
  * Format spec: scripts/resolvers/preamble/generate-ask-user-format.ts
  *   Recommendation: <choice> because <one-line reason>
  */
+export const RECOMMENDATION_JUDGE_SCHEMA = {
+  type: 'object',
+  properties: {
+    reason_substance: { type: 'integer', enum: [1, 2, 3, 4, 5] },
+    reasoning: { type: 'string' },
+  },
+  required: ['reason_substance', 'reasoning'],
+  additionalProperties: false,
+};
+
 export async function judgeRecommendation(askUserText: string, signal?: AbortSignal): Promise<RecommendationScore> {
   signal?.throwIfAborted();
   // Deterministic checks. The format spec requires:
@@ -413,7 +482,7 @@ Respond with ONLY valid JSON:
   const out = await callJudge<{ reason_substance: number; reasoning: string }>(
     prompt,
     'claude-haiku-4-5-20251001',
-    { signal },
+    { signal, jsonSchema: RECOMMENDATION_JUDGE_SCHEMA },
   );
 
   // Defensive clamp: rubric is 1-5. If Haiku returns out-of-range or non-numeric,
@@ -452,9 +521,6 @@ export interface ArmJudgeScore {
  * ruler.
  */
 export const ARM_JUDGE_MODEL = CLAUDE_FRONTIER_EVAL_MODEL;
-
-/** Bounded retry-on-malformed loop: total attempts, not extra retries. */
-export const ARM_JUDGE_ATTEMPTS = 2;
 
 /**
  * Build the over-engineering rubric prompt. Exported (pure) so the free
@@ -528,10 +594,10 @@ export function parseArmJudgeResponse(raw: unknown): ArmJudgeScore {
  *
  * - Zero-diff arms are VALID scored cells: the agent built nothing, so the
  *   score is deterministically 0/"none" — no API call.
- * - Bounded retry-on-malformed: ARM_JUDGE_ATTEMPTS total attempts. callJudge
- *   already retries 429s internally; this loop covers malformed/refused JSON.
+ * - One sample, never re-asked: a malformed or refused verdict is a failed
+ *   sample. callJudge's transport-level 429 backoff is not a verdict retry.
  * - `opts.call` is an injection seam so the free selftest can exercise the
- *   retry bound without spending API money. Defaults to the real callJudge.
+ *   malformed path without spending API money. Defaults to the real callJudge.
  */
 export async function armJudge(
   task: string,
@@ -546,18 +612,10 @@ export async function armJudge(
     };
   }
   const call = opts?.call ?? callJudge;
-  const prompt = buildArmJudgePrompt(task, diff);
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= ARM_JUDGE_ATTEMPTS; attempt++) {
-    try {
-      const raw = await call<Record<string, unknown>>(prompt, ARM_JUDGE_MODEL);
-      return parseArmJudgeResponse(raw);
-    } catch (err) {
-      lastError = err;
-    }
+  const raw = await call<Record<string, unknown>>(buildArmJudgePrompt(task, diff), ARM_JUDGE_MODEL);
+  try {
+    return parseArmJudgeResponse(raw);
+  } catch (err) {
+    throw new Error(`armJudge: malformed verdict (never resampled) — ${err instanceof Error ? err.message : String(err)}`);
   }
-  throw new Error(
-    `armJudge: no well-formed verdict after ${ARM_JUDGE_ATTEMPTS} attempts — `
-    + (lastError instanceof Error ? lastError.message : String(lastError)),
-  );
 }

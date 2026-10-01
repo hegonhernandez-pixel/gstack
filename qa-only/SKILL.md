@@ -418,7 +418,7 @@ Read sections in full when directed; do not work from memory.
 
 | When | Read this section |
 |------|-------------------|
-| running selected report-only baseline and exploratory probes without product or test writes | `sections/exploratory.md` relative to the installed `qa-only`/`gstack-qa-only` SKILL.md directory |
+| selecting surfaces and later running the selected report-only probes without product or test writes (one Read covers both) | `sections/exploratory.md` relative to the installed `qa-only`/`gstack-qa-only` SKILL.md directory |
 | finalizing the report after probing stops | `sections/reporting.md` relative to the installed `qa-only`/`gstack-qa-only` SKILL.md directory |
 
 Start at Request Parameters, then follow the sections below in order.
@@ -464,11 +464,11 @@ the current behavior. Reading old notes never requires writing new ones.
 
 ## Select Surfaces and Isolation
 
-Load the shared preparation gate now: complete its scope and selected-method Reads,
+Load the shared preparation gate now (the exploratory STOP just below): complete its scope and selected-method Reads,
 await their results, and select the surfaces. Defer charters, clocks and probes to
 Run the Selected Checks, after report ownership and conditional browser setup below.
 
-> **STOP.** Before running selected report-only baseline and exploratory probes without product or test writes, Read `sections/exploratory.md` relative to the installed `qa-only`/`gstack-qa-only` SKILL.md directory in full and follow it.
+> **STOP.** Before selecting surfaces and later running the selected report-only probes without product or test writes (one Read covers both), Read `sections/exploratory.md` relative to the installed `qa-only`/`gstack-qa-only` SKILL.md directory in full and follow it.
 > Use this host's installed path, never the product working directory or another host's assets.
 > If missing or unreadable, report a QA setup blocker and its affected probes as blocked; continue other safe probes (independent functional/static checks). Missing/unreadable assets block required QA.
 
@@ -478,7 +478,7 @@ For mixed Regression, the argument is the prior combined report. Resolve its fun
 replay evidence and browser baseline links first, then give each method its own baseline.
 A missing baseline blocks that surface's regression coverage, not independent checks.
 In mixed runs, use the user's surface order, defaulting to functional then browser.
-Finish one surface's probes before starting the next surface's clock; any supplied
+Each surface keeps its own clock in its own directory. Finish one surface's probes before starting the next surface's clock; any supplied
 absolute deadline still applies to both. Do not reset a clock when switching surfaces.
 
 ## Prepare Report Artifacts
@@ -532,7 +532,7 @@ During browser discovery, observe behavior without reading source to diagnose it
 
 ### Assemble the report
 
-After probing stops, load the finalization procedure below. Use retained evidence;
+After probing stops, load the finalization procedure below. Order: exploratory §4 annotations and materialize (browser-only runs pass an empty evidence list), then this procedure, then the final report Write. Use retained evidence;
 this step does not authorize more probes or restart an expired clock.
 Do not preload reporting. To recover from an accidental early Read:
 If already read, issue another Read now and await its
@@ -554,10 +554,10 @@ Preserve the initial charters under **Charters** after that metadata, before fin
 
 Each proposed test carries a value card; propose it only when it passes this bar:
 
-**Test value bar.** Before writing the test (the reproduced bug answers what it protects and what makes it fail):
+**Test value bar.** Before writing or proposing a test, the reproduced bug already answers what it protects and what makes it fail; also answer:
 
-3. Why does existing coverage not already catch that? Prefer adding a row to an existing table-driven test or shared fixture over a near-duplicate.
-4. Does it need a production seam (export, flag, wrapper, injection hook) that no production caller needs? If yes, test at the real boundary instead.
+1. Why does existing coverage not already catch that? Prefer adding a row to an existing table-driven test or shared fixture over a near-duplicate.
+2. Does it need a production seam (export, flag, wrapper, injection hook) that no production caller needs? If yes, test at the real boundary instead.
 
 Value card: `Value: protects=<...>; fails_when=<...>; why_new=<...>; seam=none` (seam: `none` or its name); each field at most 160 UTF-8 bytes here (clamp to 157 plus `...`; JSON keeps full values). Put it in the 8e.5 record (/qa) or under each proposed test (/qa-only). A missing upstream card never blocks: derive it; ignore unknown fields.
 

@@ -666,7 +666,7 @@ Sanitize every query before it leaves the machine: strip hostnames, IPs, file pa
 
 ## Step 4: Critical pass (core review)
 
-> **STOP.** Before any probe, including plan checks, complete the ordered scope/method Reads below. Templates cannot replace them.
+> **STOP.** Before any probe, including plan checks, complete the ordered scope/method Reads below and await them. Templates cannot replace them.
 Step 4 is read-only: defer charters, setup and probes to Step 4.7.
 
 From the installed /review SKILL.md's directory, choose one path:
@@ -693,7 +693,7 @@ _aside_exec "Search the web for {framework} {version} {pattern} current best pra
 ```
 
 Without Aside `READY`, use WebSearch if available; with neither, disclose the gap
-and use existing knowledge.
+and use existing knowledge. Don't wait on research: run it alongside independent work, such as specialist dispatch.
 
 ### Shared-code opportunities (core pass)
 
@@ -823,9 +823,9 @@ Never install, import cookies or bootstrap tests. Functional-only skips browser 
 - Required: plan commands/assertions, listed separately. Other ideas are optional, untested.
 
 **3. Run smoke and plan checks.**
-Follow the shared Probe loop for smoke checks, replays and revalidation until the smoke limit.
-Then run required plan checks, even after smoke expires, using the same procedure but no smoke guard; never reset the clock.
-Use finite command timeouts, capped at the caller's remaining time if it has a deadline.
+Follow the shared Probe loop for smoke checks and replays until the smoke limit.
+Then run required plan checks and revalidation, even after smoke expires, using the same procedure but no smoke guard; never reset the clock.
+Use finite command timeouts, capped at the caller's remaining time if it has a deadline. /review sets none; only an invoker-supplied EARLIER_UTC counts.
 Await clock/guard results before acting. When the caller's deadline expires, mark unfinished checks not-run.
 
 **4. Check freshness before reporting.**
@@ -843,7 +843,8 @@ Return verified defects to Fix-First: `path`, `line`, `category`,
 `fingerprint: path:line:category`, replay, `test_stub`. Use checklist severity;
 unmatched functional failures are `functional-contract`, `CRITICAL`.
 Setup/permission blockers are not defects. Test creation needs user approval.
-Ask for setup/permission, never secrets. Unresolved coverage makes Step 5.8 incomplete; a ship waiver cannot complete it.
+Ask only for a named permission or setup the user performs, never secrets. Report-only /review never runs setup, installs or cookie import, even after approval.
+After a grant, recheck readiness and run affected checks; otherwise they stay blocked. Unresolved coverage makes Step 5.8 incomplete; a ship waiver cannot complete it.
 
 **5. Prepare one provisional QA section.**
 Read QA's `templates/functional-report-template.md`. Title it
@@ -964,13 +965,13 @@ Retain the completed action in the invocation action list before starting any re
 
 ### Step 5c: Batch-ask about ASK items
 
-If there are ASK items remaining, present them in ONE AskUserQuestion:
+Present remaining ASK items in ONE AskUserQuestion:
 
-- List each item with a number, the severity label (or `[ADVISORY]` for optional advice), the problem, and a recommended fix
-- For each item, provide options: A) Fix as recommended, B) Skip
+- Number each item with its severity label (or `[ADVISORY]` for optional advice), problem and recommended fix
+- Options per item: A) Fix as recommended, B) Skip (describe only as: no code/index change; Skip recorded)
 - Include an overall RECOMMENDATION
 
-If 3 or fewer ASK items, you may use individual AskUserQuestion calls instead of batching.
+With 3 or fewer ASK items, individual AskUserQuestion calls are fine.
 Retain each explicit Skip choice and its finding metadata in the invocation action list. Do not record an unanswered question as skipped or ask again about a decision already revalidated in this invocation.
 
 ### Step 5d: Apply user-approved fixes
@@ -1066,8 +1067,9 @@ for the native result, or vice versa. Step 4.8's structured-review gate still ap
 
 - Use Step 4.6's `specialists` object unchanged, including its empty small-diff map.
   If this host omits Review Army, use `specialists: {}` without claiming specialist coverage.
-- Build `findings` from final-pass core, specialist, verified exploratory QA
-  findings and invocation actions. Retain `fingerprint`, `severity`
+- Build `findings` from the final-pass findings Step 5 combined (core, specialist,
+  Step 4.8 adversarial, VALID & ACTIONABLE Greptile and verified exploratory QA
+  findings) and invocation actions. Retain `fingerprint`, `severity`
   (`CRITICAL|INFORMATIONAL`), `action`, and any `advisory`, `evidence_paths`,
   `helper_target`. Recheck source after fixes. The logger uses `sharedLibsFingerprint`,
   never supplied/model hashes.

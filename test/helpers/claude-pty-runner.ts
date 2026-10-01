@@ -1987,7 +1987,7 @@ function conflictingDesignClosure(text: string): boolean {
     new RegExp(`(?:^|[.!?;]\\s+|\\n)(?:If|When|Once|Unless|Assuming|Provided)\\b[^.!?\\n]*\\b${owner}\\b`, 'i').test(text);
 }
 
-function hasCompletePlanReport(expectedPlanPath: string, minimumMtime: number, maximumMtime: number,
+export function hasCompletePlanReport(expectedPlanPath: string, minimumMtime: number, maximumMtime: number,
   allowRunHeaderForFailure = false, requiredReview?: 'Design'): boolean {
   if (!path.isAbsolute(expectedPlanPath)) return false;
   try {
@@ -3123,45 +3123,29 @@ export const engStep0Boundary: Step0BoundaryPredicate = (fp) =>
   // plan-eng-review-idempotency, plan-eng-review-todos-e2e-concurrent.
   /gstack-qid:\s*(?:plan-)?eng-review-/i.test(fp.promptSnippet);
 
-/** Completed plan-wide focus and local-learnings choices remain setup, even when asked late. */
-export const designReviewSetupAUQ: Step0BoundaryPredicate = (fp) => {
-  const call = fp.nativeCall;
-  if (call?.answered !== true || call.failed !== false || !call.sessionId || !call.toolUseId ||
-      call.questions.length !== 1 || !Array.isArray(call.unansweredQuestionIndices) || call.unansweredQuestionIndices.length ||
-      !Number.isFinite(Date.parse(call.answeredAt ?? '')) || fp.signature !== `${call.sessionId}:${call.toolUseId}` ||
-      (fp.nativeQuestionIndex !== undefined && fp.nativeQuestionIndex !== 0)) return false;
-  const q = call.questions[0]!;
-  if (q.multiSelect || q.options.length !== 2 || new Set(q.options.map(o => o.label)).size !== 2 ||
-      Object.keys(call.answers ?? {}).length !== 1 || q.options.filter(o => o.label === call.answers?.[q.question]).length !== 1 ||
-      fp.options.length !== 2 || !fp.options.every((o, i) => o.index === i + 1 && o.label === q.options[i]!.label)) return false;
+/**
+ * The seed declares "Design: review all seven dimensions" for the pending Step 0D
+ * focus menu. Pick its single all-seven option only when every other option
+ * narrows the review and the brief approves no product action.
+ */
+export function pickDesignFocusAll(q: NativePlanQuestionCall['questions'][number]): number | null {
+  if (q.multiSelect || q.options.length < 2 || q.options.length > 4 || new Set(q.options.map(o => o.label)).size !== q.options.length) return null;
   const text = q.question.trim();
   const title = text.split(/\r?\n/, 1)[0]!.replace(/^D[1-9]\d*\s*[—–:-]\s*/i, '');
   const sources = [...text.matchAll(/^Project\/branch\/task:\s*([^\n]+)$/gm)];
-  const source = sources[0]?.[1] ?? '';
-  // Setup never approves another product action. Quoted examples and negative
-  // consequences are explanatory; current imperative clauses remain decisions.
   const explanatory = [text, ...q.options.map(o => o.description ?? '')].join('\n')
-    .replace(/`+[^`]*`+|"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’/g, '')
-    .replace(/[✅❌*]/g, '');
-  if (/(?:^|[.!?;:\n]|\b(?:and|while))\s*(?:(?:also|please|then|now)\s+)*(?:approv(?:e|ing)|deploy(?:ing)?|implement(?:ing)?|ship(?:ping)?|merg(?:e|ing)|delet(?:e|ing))\b/im.test(explanatory)) return false;
-  if (sources.length !== 1 || (text.match(/\?/g)?.length ?? 0) !== 1 || /```|~~~|^\s*>/m.test(text) ||
-      !/\bplan-design-review of PLAN\.md\b/i.test(source) ||
-      /\b(?:historical|archived|quoted|example|foreign|other|another|previous)\b/i.test(source)) return false;
-  const labels = q.options.map(o => o.label.trim().replace(/^[A-Z][).:]\s+/i, '')
-    .replace(/\s*\(recommended\)\s*$/i, ''));
-  if (/^(?:Learnings|Cross-project)$/i.test(q.header.trim()) &&
-      /^Enable cross[- ]project learnings(?: search)?\?$/i.test(title) &&
-      labels.some(label => /^Enable cross[- ]project learnings$/i.test(label)) &&
-      labels.some(label => /^Keep learnings project[- ]scoped(?: only)?$/i.test(label))) {
-    // Reuse the existing native cross-project premise/owned answer classifier.
-    return engSetupAUQ(fp);
-  }
-  return /^(?:Focus|Review focus)$/i.test(q.header.trim()) &&
-    /^Review all 7 (?:design )?(?:dimensions|passes),? or focus(?: on (?:specific areas|a subset))?\?$/i.test(title) &&
-    /^ELI10:\s*I['’]ve rated this plan (?:10(?:\.0+)?|[0-9](?:\.\d+)?)\/10 on design completeness\./mi.test(text) &&
-    labels.some(label => /^(?:Review )?All 7 (?:design )?(?:dimensions|passes)$/i.test(label)) &&
-    labels.some(label => /^(?:Only (?:the )?[1-6](?: listed)? (?:gaps|areas|dimensions|passes)|Focus on (?:specific areas|a subset))$/i.test(label));
-};
+    .replace(/`+[^`]*`+|"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’/g, '').replace(/[✅❌*]/g, '');
+  if (!/^Review all (?:7|seven) (?:design )?(?:dimensions|passes),? or focus(?: on [^?\n]+)?\?$/i.test(title) ||
+      sources.length !== 1 || !/\bplan-design-review of PLAN\.md\b/i.test(sources[0]![1]!) ||
+      /\b(?:historical|archived|quoted|example|foreign|other|another|previous)\b/i.test(sources[0]![1]!) ||
+      (text.match(/\?/g)?.length ?? 0) !== 1 || /```|~~~|^\s*>/m.test(text) ||
+      !/^ELI10:\s*I['’]ve rated this plan (?:10(?:\.0+)?|[0-9](?:\.\d+)?)\/10 on design completeness\./mi.test(text) ||
+      /(?:^|[.!?;:\n]|\b(?:and|while))\s*(?:(?:also|please|then|now)\s+)*(?:approv(?:e|ing)|deploy(?:ing)?|implement(?:ing)?|ship(?:ping)?|merg(?:e|ing)|delet(?:e|ing))\b/im.test(explanatory)) return null;
+  const labels = q.options.map(o => o.label.trim().replace(/^[A-Z][).:]\s+/i, '').replace(/\s*\(recommended\)\s*$/i, ''));
+  const all = labels.flatMap((label, i) => /^(?:Review )?All (?:7|seven) (?:design )?(?:dimensions|passes)$/i.test(label) ? [i + 1] : []);
+  if (all.length !== 1 || labels.some((label, i) => i + 1 !== all[0] && !/^(?:Only|Focus)\b/i.test(label))) return null;
+  return all[0]!;
+}
 
 /**
  * Spawn `claude --permission-mode plan` in a real PTY and return a session
@@ -4212,6 +4196,7 @@ export async function runPlanSkillCounting(opts: {
   const saveSnapshot = createPlanCountSnapshotWriter();
   let lastCheckpointAt = Date.now();
   let viewport = '';
+  let lastOutputAt = Date.now();
 
   const capture = (observation: object) => {
     const publicTools: NativePublicToolEvent[] = [];
@@ -4280,6 +4265,7 @@ export async function runPlanSkillCounting(opts: {
     while (remainingWork() > 0) {
       await session.waitForOutput(observedOutput, Math.min(2000, remainingWork()));
       if (remainingWork() <= 0) break;
+      if (session.rawOutput().length > observedOutput) lastOutputAt = Date.now();
       const coalesceMs = session.rawOutput().length > observedOutput
         ? 250 : 250 - (performance.now() - lastObservationAt);
       if (coalesceMs > 0 && !await waitForWork(coalesceMs)) break;
@@ -4560,7 +4546,8 @@ export async function runPlanSkillCounting(opts: {
 
     return snapshot(
       'timeout',
-      `no terminal outcome within ${timeoutMs}ms total budget (including startup and ${cleanupReserveMs}ms cleanup reserve; step0=${step0Count}, review=${reviewCount})`,
+      `no terminal outcome within ${timeoutMs}ms total budget (including startup and ${cleanupReserveMs}ms cleanup reserve; step0=${step0Count}, review=${reviewCount}); ` +
+        `idleFor=${Date.now() - lastOutputAt}ms`,
       viewport,
     );
   } catch (error) {
@@ -4733,6 +4720,9 @@ export async function runPlanSkillFloorCheck(opts: {
     'Proceed directly to the requested review; skip the optional /office-hours prerequisite.',
     'This actor has already declined routing setup, cross-project recall and outside reviewers.',
     'Preserve the supplied product scope. For review-mode questions choose HOLD SCOPE (CEO), DX POLISH (DX), or the full BIG CHANGE review (Eng). Design: review all seven dimensions.',
+    // Runs 36626737820 and 36776104571: CEO read scope preservation as approving
+    // approach A, so the seeded premise gap never reached a question.
+    ...(opts.skillName === 'plan-ceo-review' ? ['Preserving scope does not approve the plan\'s premise, approach or any remedy.'] : []),
     ...(opts.productType === 'sdk-documentation' ? [
       'Product type is confirmed: SDK quickstart documentation, with the complete journey to the first SDK call as context. If asked to classify, choose SDK + Docs when offered, otherwise Documentation. This confirms the review lens; it does not expand the plan.',
       'Target persona is confirmed: a hands-on developer integrating this SDK for the first time, trying to make one successful call. Product type and persona setup are already answered; proceed to reviewing the supplied plan.',
@@ -4928,11 +4918,9 @@ export async function runPlanSkillFloorCheck(opts: {
         const question = pendingQuestion.questions[index]!;
         const key = `${pendingQuestion.sessionId}:${pendingQuestion.toolUseId}`;
         const chosen = setupChoices.get(key) ?? new Set<number>();
-        const allDesign = opts.skillName === 'plan-design-review' && designReviewSetupAUQ(fp)
-          ? question.options.flatMap((option, i) => /^(?:Review )?All 7 (?:design )?(?:dimensions|passes)(?:\s*\(recommended\))?$/i.test(option.label.trim()) ? [i + 1] : []) : [];
         const pick = pickPlanFloorMode(opts.skillName, question) ?? planCountPrerequisitePick(fp, fp)
           ?? (opts.skillName === 'plan-devex-review' ? pickPlanFloorProductType(question, opts.productType) : null)
-          ?? (allDesign.length === 1 ? allDesign[0]! : null);
+          ?? (opts.skillName === 'plan-design-review' ? pickDesignFocusAll(question) : null);
         if (pick !== null) {
           if (!chosen.has(index)) {
             session.send(planCountQuestionInput(viewport, fp, pick));
